@@ -7,6 +7,7 @@ const path = require('path');
 // Configuration constants
 const MAX_INSTRUCTION_LENGTH = 500;
 const COPILOT_SUGGEST_TYPE = 'shell';
+const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for file reads
 
 /**
  * Sanitize a file to prevent security issues
@@ -38,6 +39,13 @@ async function sanitizeFile(filename) {
   const filePath = path.join(process.cwd(), filename);
   if (fs.existsSync(filePath)) {
     core.info(`File exists: ${filePath}`);
+
+    // Check file size before reading
+    const stats = fs.statSync(filePath);
+    if (stats.size > MAX_FILE_SIZE) {
+      core.warning(`File ${filename} is too large (${stats.size} bytes), skipping sanitization`);
+      return;
+    }
 
     // Basic sanitization: trim whitespace, validate content
     const content = fs.readFileSync(filePath, 'utf8');
@@ -144,13 +152,12 @@ async function commitAndPush(message, branch) {
     await exec.exec('git', ['add', '.']);
 
     // Check if there are changes to commit using git diff-index
-    let hasChanges = false;
     const exitCode = await exec.exec('git', ['diff-index', '--quiet', 'HEAD', '--'], {
       ignoreReturnCode: true,
     });
 
     // Non-zero exit code means there are changes
-    hasChanges = exitCode !== 0;
+    const hasChanges = exitCode !== 0;
 
     if (hasChanges) {
       await exec.exec('git', ['commit', '-m', message]);
@@ -253,8 +260,17 @@ async function run() {
     if (filename) {
       const filePath = path.join(process.cwd(), filename);
       if (fs.existsSync(filePath)) {
-        const fileContent = fs.readFileSync(filePath, 'utf8');
-        instructions = `Process the following instructions from ${filename}:\n${fileContent.substring(0, MAX_INSTRUCTION_LENGTH)}`;
+        // Check file size before reading
+        const stats = fs.statSync(filePath);
+        if (stats.size > MAX_FILE_SIZE) {
+          core.warning(
+            `File ${filename} is too large (${stats.size} bytes), using generic instructions`
+          );
+          instructions = `Follow instructions in ${filename}`;
+        } else {
+          const fileContent = fs.readFileSync(filePath, 'utf8');
+          instructions = `Process the following instructions from ${filename}:\n${fileContent.substring(0, MAX_INSTRUCTION_LENGTH)}`;
+        }
       } else {
         instructions = `Follow instructions in ${filename}`;
       }
