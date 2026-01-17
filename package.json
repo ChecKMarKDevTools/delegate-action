@@ -1,0 +1,48 @@
+{
+  "name": "delegate-action",
+  "version": "1.0.0",
+  "description": "A GitHub Action that uses Copilot CLI to delegate tasks, create PRs, and assign reviewers",
+  "main": "src/index.js",
+  "scripts": {
+    "build": "ncc build src/index.js -o dist",
+    "lint": "eslint src/**/*.js",
+    "format": "prettier --write \"**/*.{js,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{js,json,md,yml,yaml}\"",
+    "test": "echo \"No tests specified yet\" && exit 0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ChecKMarKDevTools/delegate-action.git"
+  },
+  "keywords": [
+    "github",
+    "actions",
+    "copilot",
+    "automation",
+    "pr",
+    "review"
+  ],
+  "author": "ChecKMarKDevTools",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/ChecKMarKDevTools/delegate-action/issues"
+  },
+  "homepage": "https://github.com/ChecKMarKDevTools/delegate-action#readme",
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "@actions/exec": "^1.1.1",
+    "@actions/github": "^6.0.0"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^18.6.1",
+    "@commitlint/config-conventional": "^18.6.3",
+    "@vercel/ncc": "^0.38.3",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.2.1",
+    "prettier": "^3.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
