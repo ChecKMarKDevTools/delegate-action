@@ -3,111 +3,124 @@ const exec = require('@actions/exec');
 const github = require('@actions/github');
 const fs = require('fs');
 const path = require('path');
+const sanitizeFilename = require('sanitize-filename');
+const validator = require('validator');
+const pino = require('pino');
 
-// Configuration constants
+const logger = pino({
+  level: process.env.LOG_LEVEL || 'info',
+  transport: {
+    target: 'pino-pretty',
+    options: {
+      colorize: false,
+      translateTime: 'SYS:standard',
+      ignore: 'pid,hostname',
+    },
+  },
+});
+
 const MAX_INSTRUCTION_LENGTH = 500;
-const COPILOT_SUGGEST_TYPE = 'shell';
-const MAX_FILE_SIZE = 1024 * 1024; // 1MB limit for file reads
+const MAX_FILE_SIZE = 1024 * 1024;
 
 /**
- * Sanitize a file to prevent security issues
- * @param {string} filename - The file to sanitize
- * @returns {Promise<void>}
+ * Validate and sanitize a filename
+ * @param {string} filename - The filename to sanitize
+ * @returns {string} Sanitized filename
  */
-async function sanitizeFile(filename) {
-  core.info(`Sanitizing file: ${filename}`);
-
-  if (!filename || filename === '') {
-    core.info('No filename provided, skipping sanitization');
-    return;
+function validateFilename(filename) {
+  if (!filename || !validator.isLength(filename, { min: 1, max: 255 })) {
+    throw new Error('Filename must be between 1 and 255 characters');
   }
 
-  // Validate filename doesn't contain dangerous patterns
-  const dangerousPatterns = [
-    /\.\./, // Directory traversal
-    /^\//, // Absolute paths
-    /[<>:"|?*]/, // Invalid filename characters
-  ];
+  const sanitized = sanitizeFilename(filename, { replacement: '_' });
 
-  for (const pattern of dangerousPatterns) {
-    if (pattern.test(filename)) {
-      throw new Error(`Invalid filename: ${filename} contains dangerous pattern`);
-    }
+  if (sanitized !== filename) {
+    logger.warn({ original: filename, sanitized }, 'Filename was sanitized');
   }
 
-  // Check if file exists
-  const filePath = path.join(process.cwd(), filename);
-  if (fs.existsSync(filePath)) {
-    core.info(`File exists: ${filePath}`);
-
-    // Check file size before reading
-    const stats = fs.statSync(filePath);
-    if (stats.size > MAX_FILE_SIZE) {
-      core.warning(`File ${filename} is too large (${stats.size} bytes), skipping sanitization`);
-      return;
-    }
-
-    // Basic sanitization: trim whitespace, validate content
-    const content = fs.readFileSync(filePath, 'utf8');
-    const sanitized = content.trim();
-
-    if (content !== sanitized) {
-      fs.writeFileSync(filePath, sanitized, 'utf8');
-      core.info('File sanitized: removed leading/trailing whitespace');
-    }
-  } else {
-    core.warning(`File not found: ${filePath}`);
+  if (path.isAbsolute(sanitized)) {
+    throw new Error('Absolute paths are not allowed');
   }
+
+  if (sanitized.includes('..')) {
+    throw new Error('Path traversal detected');
+  }
+
+  return sanitized;
+}
+
+/**
+ * Validate file safety before reading
+ * @param {string} filename - The filename to validate
+ * @returns {Promise<string>} Resolved file path
+ */
+async function validateFile(filename) {
+  logger.info({ filename }, 'Validating file');
+
+  const sanitizedFilename = validateFilename(filename);
+  const filePath = path.join(process.cwd(), sanitizedFilename);
+
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`File not found: ${sanitizedFilename}`);
+  }
+
+  const stats = fs.statSync(filePath);
+  if (stats.size > MAX_FILE_SIZE) {
+    throw new Error(
+      `File ${sanitizedFilename} exceeds maximum size of ${MAX_FILE_SIZE} bytes (actual: ${stats.size} bytes)`
+    );
+  }
+
+  if (!stats.isFile()) {
+    throw new Error(`Path ${sanitizedFilename} is not a file`);
+  }
+
+  logger.info({ filePath, size: stats.size }, 'File validated successfully');
+  return filePath;
 }
 
 /**
  * Run GitHub Copilot CLI command
  * @param {string} token - GitHub token
- * @param {string} baseRef - Base reference
  * @param {string} instructions - Instructions to follow
  * @returns {Promise<void>}
  */
-async function runCopilot(token, baseRef, instructions) {
-  core.info(`Running Copilot CLI with base ref: ${baseRef}`);
+async function runCopilot(token, instructions) {
+  logger.info('Checking GitHub Copilot CLI installation');
 
   try {
-    // Check if GitHub Copilot CLI is installed
-    let isInstalled = false;
-    await exec.exec('gh', ['extension', 'list'], {
+    let copilotVersion = '';
+    await exec.exec('npx', ['@github/copilot', '--version'], {
       ignoreReturnCode: true,
       listeners: {
         stdout: (data) => {
-          const output = data.toString();
-          if (output.includes('gh-copilot')) {
-            isInstalled = true;
-          }
+          copilotVersion = data.toString().trim();
         },
       },
     });
 
-    // Install if not available
-    if (!isInstalled) {
-      core.info('Installing GitHub Copilot CLI extension');
-      try {
-        await exec.exec('gh', ['extension', 'install', 'github/gh-copilot']);
-        core.info('GitHub Copilot CLI extension installed successfully');
-      } catch (installError) {
-        core.warning(`Failed to install Copilot CLI: ${installError.message}`);
-        return;
-      }
+    if (copilotVersion) {
+      logger.info({ version: copilotVersion }, 'GitHub Copilot CLI is available');
+    } else {
+      logger.warn('GitHub Copilot CLI not found, installing...');
+      await exec.exec('npm', ['install', '-g', '@github/copilot']);
+      logger.info('GitHub Copilot CLI installed successfully');
     }
 
-    // Run copilot command - using suggest for demonstration
-    // Note: In production, this would interact with the Copilot CLI more effectively
-    const args = ['copilot', 'suggest', '-t', COPILOT_SUGGEST_TYPE, instructions];
-    await exec.exec('gh', args, {
+    logger.info({ instructionsLength: instructions.length }, 'Executing Copilot CLI');
+
+    await exec.exec('npx', ['@github/copilot'], {
+      input: Buffer.from(instructions),
       env: {
         ...process.env,
         GH_TOKEN: token,
         GITHUB_TOKEN: token,
       },
     });
+
+    logger.info('Copilot CLI execution completed');
   } catch (error) {
+    logger.error({ error: error.message }, 'Copilot CLI execution failed');
     core.warning(`Copilot CLI execution failed: ${error.message}`);
   }
 }
@@ -118,14 +131,13 @@ async function runCopilot(token, baseRef, instructions) {
  * @returns {Promise<void>}
  */
 async function createBranch(branchName) {
-  core.info(`Creating new branch: ${branchName}`);
+  logger.info({ branchName }, 'Creating new branch');
 
   try {
     await exec.exec('git', ['checkout', '-b', branchName]);
-    core.info(`Branch ${branchName} created successfully`);
+    logger.info({ branchName }, 'Branch created successfully');
   } catch (error) {
-    core.warning(`Failed to create branch: ${error.message}`);
-    // Try to checkout existing branch
+    logger.warn({ branchName, error: error.message }, 'Failed to create branch, trying checkout');
     await exec.exec('git', ['checkout', branchName], { ignoreReturnCode: true });
   }
 }
@@ -137,10 +149,9 @@ async function createBranch(branchName) {
  * @returns {Promise<void>}
  */
 async function commitAndPush(message, branch) {
-  core.info('Committing and pushing changes');
+  logger.info({ branch, message }, 'Committing and pushing changes');
 
   try {
-    // Configure git
     await exec.exec('git', ['config', 'user.name', 'github-actions[bot]']);
     await exec.exec('git', [
       'config',
@@ -148,25 +159,23 @@ async function commitAndPush(message, branch) {
       'github-actions[bot]@users.noreply.github.com',
     ]);
 
-    // Add all changes
     await exec.exec('git', ['add', '.']);
 
-    // Check if there are changes to commit using git diff-index
     const exitCode = await exec.exec('git', ['diff-index', '--quiet', 'HEAD', '--'], {
       ignoreReturnCode: true,
     });
 
-    // Non-zero exit code means there are changes
     const hasChanges = exitCode !== 0;
 
     if (hasChanges) {
       await exec.exec('git', ['commit', '-m', message]);
       await exec.exec('git', ['push', '-u', 'origin', branch]);
-      core.info('Changes committed and pushed successfully');
+      logger.info({ branch }, 'Changes committed and pushed successfully');
     } else {
-      core.info('No changes to commit');
+      logger.info('No changes to commit');
     }
   } catch (error) {
+    logger.error({ error: error.message }, 'Commit/push failed');
     core.warning(`Commit/push failed: ${error.message}`);
   }
 }
@@ -181,7 +190,7 @@ async function commitAndPush(message, branch) {
  * @returns {Promise<number|null>} PR number or null
  */
 async function createPullRequest(token, branch, baseBranch, title, body) {
-  core.info('Creating pull request');
+  logger.info({ branch, baseBranch, title }, 'Creating pull request');
 
   try {
     const octokit = github.getOctokit(token);
@@ -196,9 +205,10 @@ async function createPullRequest(token, branch, baseBranch, title, body) {
       base: baseBranch,
     });
 
-    core.info(`Pull request created: #${pr.number}`);
+    logger.info({ prNumber: pr.number, prUrl: pr.html_url }, 'Pull request created successfully');
     return pr.number;
   } catch (error) {
+    logger.error({ error: error.message }, 'Failed to create PR');
     core.error(`Failed to create PR: ${error.message}`);
     return null;
   }
@@ -211,7 +221,7 @@ async function createPullRequest(token, branch, baseBranch, title, body) {
  * @returns {Promise<void>}
  */
 async function assignPR(token, prNumber) {
-  core.info(`Assigning PR #${prNumber} to actor`);
+  logger.info({ prNumber }, 'Assigning PR to actor');
 
   try {
     const octokit = github.getOctokit(token);
@@ -224,8 +234,9 @@ async function assignPR(token, prNumber) {
       assignees: [context.actor],
     });
 
-    core.info(`PR assigned to ${context.actor}`);
+    logger.info({ prNumber, actor: context.actor }, 'PR assigned successfully');
   } catch (error) {
+    logger.error({ error: error.message }, 'Failed to assign PR');
     core.warning(`Failed to assign PR: ${error.message}`);
   }
 }
@@ -235,7 +246,6 @@ async function assignPR(token, prNumber) {
  */
 async function run() {
   try {
-    // Get inputs
     const privateToken = core.getInput('PRIVATE_TOKEN', { required: true });
     const filename = core.getInput('filename', { required: false });
     const baseBranch = core.getInput('branch', { required: false }) || 'main';
@@ -244,60 +254,47 @@ async function run() {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const newBranch = `copilot/delegate-${timestamp}`;
 
-    core.info('Starting delegate action workflow');
-    core.info(`Repository: ${context.repo.owner}/${context.repo.repo}`);
-    core.info(`Base branch: ${baseBranch}`);
-    core.info(`New branch: ${newBranch}`);
+    logger.info(
+      {
+        repository: `${context.repo.owner}/${context.repo.repo}`,
+        baseBranch,
+        newBranch,
+        actor: context.actor,
+      },
+      'Starting delegate action workflow'
+    );
 
-    // Step 1: Sanitize file
-    if (filename) {
-      await sanitizeFile(filename);
-    }
-
-    // Step 2: Run copilot with base ref
-    // Build more specific instructions
     let instructions = 'Analyze the repository and suggest improvements';
+
     if (filename) {
-      const filePath = path.join(process.cwd(), filename);
-      if (fs.existsSync(filePath)) {
-        // Check file size before reading
-        const stats = fs.statSync(filePath);
-        if (stats.size > MAX_FILE_SIZE) {
-          core.warning(
-            `File ${filename} is too large (${stats.size} bytes), using generic instructions`
-          );
-          instructions = `Follow instructions in ${filename}`;
-        } else {
-          const fileContent = fs.readFileSync(filePath, 'utf8');
-          instructions = `Process the following instructions from ${filename}:\n${fileContent.substring(0, MAX_INSTRUCTION_LENGTH)}`;
-        }
-      } else {
-        instructions = `Follow instructions in ${filename}`;
+      try {
+        const filePath = await validateFile(filename);
+        const fileContent = fs.readFileSync(filePath, 'utf8');
+        instructions = `Process the following instructions from ${filename}:\n${fileContent.substring(0, MAX_INSTRUCTION_LENGTH)}`;
+        logger.info(
+          { filename, instructionsLength: instructions.length },
+          'Loaded instructions from file'
+        );
+      } catch (error) {
+        logger.error({ filename, error: error.message }, 'Failed to load instructions file');
+        core.setFailed(`Failed to load instructions file: ${error.message}`);
+        return;
       }
     }
 
-    await runCopilot(privateToken, baseBranch, instructions);
-
-    // Step 3: Create new branch
+    await runCopilot(privateToken, instructions);
     await createBranch(newBranch);
-
-    // Step 4: Commit and push
     await commitAndPush(`feat: delegate action changes for ${filename || 'repository'}`, newBranch);
 
-    // Step 5: Run copilot for review/docs/tests
-    core.info('Running Copilot for review, documentation, and tests');
     const reviewInstructions = `Review the changes in branch ${newBranch}, create documentation for new features, and suggest test cases`;
-    await runCopilot(privateToken, baseBranch, reviewInstructions);
-
-    // Commit additional changes
+    await runCopilot(privateToken, reviewInstructions);
     await commitAndPush('docs: add documentation and tests', newBranch);
 
-    // Step 6: Create PR
     const prNumber = await createPullRequest(
       privateToken,
       newBranch,
       baseBranch,
-      `🤖 Delegate: ${filename || 'Repository changes'}`,
+      `Delegate: ${filename || 'Repository changes'}`,
       `## Automated changes by Delegate Action\n\n` +
         `This PR was automatically created by the delegate-action.\n\n` +
         `${filename ? `**File processed:** \`${filename}\`\n\n` : ''}` +
@@ -306,18 +303,16 @@ async function run() {
         `Please review the changes carefully before merging.`
     );
 
-    // Step 7: Assign actor
     if (prNumber) {
       await assignPR(privateToken, prNumber);
       core.setOutput('pr_number', prNumber);
       core.setOutput('branch', newBranch);
+      logger.info({ prNumber, branch: newBranch }, 'Delegate action completed successfully');
     }
-
-    core.info('Delegate action completed successfully');
   } catch (error) {
+    logger.error({ error: error.message, stack: error.stack }, 'Action failed');
     core.setFailed(`Action failed: ${error.message}`);
   }
 }
 
-// Run the action
 run();

@@ -16,10 +16,29 @@ permissions:
   checks: write
 
 jobs:
-  lint:
-    name: Lint
+  setup:
+    name: Setup
     runs-on: ubuntu-latest
     timeout-minutes: 10
+
+    outputs:
+      node-version: ${{ steps.volta.outputs.node-version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Read Volta configuration
+        id: volta
+        run: |
+          NODE_VERSION=$(jq -r '.volta.node // "22"' package.json)
+          echo "node-version=$NODE_VERSION" >> $GITHUB_OUTPUT
+
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [setup]
 
     steps:
       - name: Checkout code
@@ -28,7 +47,29 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ needs.setup.outputs.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npm run format:check
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [setup]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.setup.outputs.node-version }}
           cache: 'npm'
 
       - name: Install dependencies
@@ -37,13 +78,11 @@ jobs:
       - name: Run linter
         run: npm run lint
 
-      - name: Check formatting
-        run: npm run format:check
-
   build:
     name: Build
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    needs: [setup]
 
     steps:
       - name: Checkout code
@@ -52,7 +91,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ needs.setup.outputs.node-version }}
           cache: 'npm'
 
       - name: Install dependencies
@@ -66,11 +105,13 @@ jobs:
         with:
           name: dist
           path: dist/
+          retention-days: 7
 
   test:
     name: Test
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    needs: [setup]
 
     steps:
       - name: Checkout code
@@ -79,7 +120,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ needs.setup.outputs.node-version }}
           cache: 'npm'
 
       - name: Install dependencies
@@ -92,7 +133,7 @@ jobs:
     name: Code Coverage
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [test]
+    needs: [setup, test]
     if: github.event_name == 'push'
 
     steps:
@@ -102,7 +143,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ needs.setup.outputs.node-version }}
           cache: 'npm'
 
       - name: Install dependencies
@@ -116,3 +157,22 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
+
+  gate:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [format, lint, build, test]
+    if: always()
+
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [[ "${{ needs.format.result }}" != "success" ]] || \
+             [[ "${{ needs.lint.result }}" != "success" ]] || \
+             [[ "${{ needs.build.result }}" != "success" ]] || \
+             [[ "${{ needs.test.result }}" != "success" ]]; then
+            echo "Quality gate failed"
+            exit 1
+          fi
+          echo "Quality gate passed"
