@@ -1,0 +1,43 @@
+name: Example Delegate Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      filename:
+        description: 'Optional file to process (e.g., INSTRUCTIONS.md)'
+        required: false
+        default: ''
+      branch:
+        description: 'Target branch'
+        required: false
+        default: 'main'
+
+# Ensure only one instance runs at a time
+concurrency:
+  group: delegate-${{ github.ref }}
+  cancel-in-progress: false
+
+# Required permissions for the action
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  delegate:
+    name: Delegate Task
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || 'main' }}
+          fetch-depth: 0
+
+      - name: Run Delegate Action
+        uses: ChecKMarKDevTools/delegate-action@v1
+        with:
+          PRIVATE_TOKEN: ${{ secrets.GH_PAT }}
+          filename: ${{ github.event.inputs.filename }}
+          branch: ${{ github.event.inputs.branch }}
