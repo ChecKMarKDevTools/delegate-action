@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
 - Initial release of delegate-action
 - GitHub Copilot CLI integration
 - Automated PR creation and assignment

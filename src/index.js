@@ -59,25 +59,30 @@ async function runCopilot(token, baseRef, instructions) {
   core.info(`Running Copilot CLI with base ref: ${baseRef}`);
 
   try {
-    // Install GitHub Copilot CLI if not available
+    // Check if GitHub Copilot CLI is installed
+    let isInstalled = false;
     await exec.exec('gh', ['extension', 'list'], {
       ignoreReturnCode: true,
       listeners: {
         stdout: (data) => {
           const output = data.toString();
-          if (!output.includes('gh-copilot')) {
-            core.info('Installing GitHub Copilot CLI extension');
+          if (output.includes('gh-copilot')) {
+            isInstalled = true;
           }
         },
       },
     });
 
-    // Install if needed
-    await exec.exec('gh', ['extension', 'install', 'github/gh-copilot'], {
-      ignoreReturnCode: true,
-    });
+    // Install if not available
+    if (!isInstalled) {
+      core.info('Installing GitHub Copilot CLI extension');
+      await exec.exec('gh', ['extension', 'install', 'github/gh-copilot'], {
+        ignoreReturnCode: true,
+      });
+    }
 
-    // Run copilot command
+    // Run copilot command - using suggest for demonstration
+    // Note: In production, this would interact with the Copilot CLI more effectively
     const args = ['copilot', 'suggest', '-t', 'shell', instructions];
     await exec.exec('gh', args, {
       env: {
@@ -130,19 +135,16 @@ async function commitAndPush(message, branch) {
     // Add all changes
     await exec.exec('git', ['add', '.']);
 
-    // Check if there are changes to commit
-    let hasChanges = false;
-    await exec.exec('git', ['status', '--porcelain'], {
-      listeners: {
-        stdout: (data) => {
-          if (data.toString().trim().length > 0) {
-            hasChanges = true;
-          }
-        },
-      },
-    });
+    // Check if there are changes to commit using git diff-index
+    let exitCode = 0;
+    try {
+      await exec.exec('git', ['diff-index', '--quiet', 'HEAD', '--']);
+    } catch (error) {
+      // Non-zero exit code means there are changes
+      exitCode = 1;
+    }
 
-    if (hasChanges) {
+    if (exitCode !== 0) {
       await exec.exec('git', ['commit', '-m', message]);
       await exec.exec('git', ['push', '-u', 'origin', branch]);
       core.info('Changes committed and pushed successfully');
@@ -238,11 +240,19 @@ async function run() {
     }
 
     // Step 2: Run copilot with base ref
-    await runCopilot(
-      privateToken,
-      baseBranch,
-      filename ? `Follow instructions in ${filename}` : 'Follow instructions'
-    );
+    // Build more specific instructions
+    let instructions = 'Analyze the repository and suggest improvements';
+    if (filename) {
+      const filePath = path.join(process.cwd(), filename);
+      if (fs.existsSync(filePath)) {
+        const fileContent = fs.readFileSync(filePath, 'utf8');
+        instructions = `Process the following instructions from ${filename}:\n${fileContent.substring(0, 500)}`;
+      } else {
+        instructions = `Follow instructions in ${filename}`;
+      }
+    }
+
+    await runCopilot(privateToken, baseBranch, instructions);
 
     // Step 3: Create new branch
     await createBranch(newBranch);
@@ -252,11 +262,8 @@ async function run() {
 
     // Step 5: Run copilot for review/docs/tests
     core.info('Running Copilot for review, documentation, and tests');
-    await runCopilot(
-      privateToken,
-      baseBranch,
-      'Review work, create documentation, and create tests'
-    );
+    const reviewInstructions = `Review the changes in branch ${newBranch}, create documentation for new features, and suggest test cases`;
+    await runCopilot(privateToken, baseBranch, reviewInstructions);
 
     // Commit additional changes
     await commitAndPush('docs: add documentation and tests', newBranch);
