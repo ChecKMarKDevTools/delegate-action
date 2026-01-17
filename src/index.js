@@ -4,6 +4,10 @@ const github = require('@actions/github');
 const fs = require('fs');
 const path = require('path');
 
+// Configuration constants
+const MAX_INSTRUCTION_LENGTH = 500;
+const COPILOT_SUGGEST_TYPE = 'shell';
+
 /**
  * Sanitize a file to prevent security issues
  * @param {string} filename - The file to sanitize
@@ -76,14 +80,18 @@ async function runCopilot(token, baseRef, instructions) {
     // Install if not available
     if (!isInstalled) {
       core.info('Installing GitHub Copilot CLI extension');
-      await exec.exec('gh', ['extension', 'install', 'github/gh-copilot'], {
-        ignoreReturnCode: true,
-      });
+      try {
+        await exec.exec('gh', ['extension', 'install', 'github/gh-copilot']);
+        core.info('GitHub Copilot CLI extension installed successfully');
+      } catch (installError) {
+        core.warning(`Failed to install Copilot CLI: ${installError.message}`);
+        return;
+      }
     }
 
     // Run copilot command - using suggest for demonstration
     // Note: In production, this would interact with the Copilot CLI more effectively
-    const args = ['copilot', 'suggest', '-t', 'shell', instructions];
+    const args = ['copilot', 'suggest', '-t', COPILOT_SUGGEST_TYPE, instructions];
     await exec.exec('gh', args, {
       env: {
         ...process.env,
@@ -136,15 +144,15 @@ async function commitAndPush(message, branch) {
     await exec.exec('git', ['add', '.']);
 
     // Check if there are changes to commit using git diff-index
-    let exitCode = 0;
-    try {
-      await exec.exec('git', ['diff-index', '--quiet', 'HEAD', '--']);
-    } catch (error) {
-      // Non-zero exit code means there are changes
-      exitCode = 1;
-    }
+    let hasChanges = false;
+    const exitCode = await exec.exec('git', ['diff-index', '--quiet', 'HEAD', '--'], {
+      ignoreReturnCode: true,
+    });
 
-    if (exitCode !== 0) {
+    // Non-zero exit code means there are changes
+    hasChanges = exitCode !== 0;
+
+    if (hasChanges) {
       await exec.exec('git', ['commit', '-m', message]);
       await exec.exec('git', ['push', '-u', 'origin', branch]);
       core.info('Changes committed and pushed successfully');
@@ -246,7 +254,7 @@ async function run() {
       const filePath = path.join(process.cwd(), filename);
       if (fs.existsSync(filePath)) {
         const fileContent = fs.readFileSync(filePath, 'utf8');
-        instructions = `Process the following instructions from ${filename}:\n${fileContent.substring(0, 500)}`;
+        instructions = `Process the following instructions from ${filename}:\n${fileContent.substring(0, MAX_INSTRUCTION_LENGTH)}`;
       } else {
         instructions = `Follow instructions in ${filename}`;
       }
