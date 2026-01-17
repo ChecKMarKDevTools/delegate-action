@@ -315,4 +315,17 @@ async function run() {
   }
 }
 
-run();
+if (require.main === module) {
+  run();
+}
+
+module.exports = {
+  validateFilename,
+  validateFile,
+  runCopilot,
+  createBranch,
+  commitAndPush,
+  createPullRequest,
+  assignPR,
+  run,
+};

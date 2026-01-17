@@ -1,204 +1,296 @@
-# 🤖 AGENTS.md
+# 🤖 AI Agent Configuration
 
-> **Building software that works while you sleep. Well, mostly.**
+## Repository Context
 
-This document describes the automated CI/CD "agents" that keep this action from becoming a dumpster fire. Each agent has a single job: do one thing, do it well, and yell loudly when it fails.
-
----
-
-## 🎯 The Agents
-
-### 🔐 Security Agents
-
-#### CodeQL Agent
-
-**File:** `.github/workflows/codeql.yml`  
-**Runs:** On push to `main`, PRs, and weekly (Mondays at midnight UTC)  
-**Purpose:** Static application security testing (SAST) for JavaScript  
-**What it does:**
-
-- Scans the codebase for security vulnerabilities
-- Checks for common coding patterns that lead to bugs
-- Runs the `security-and-quality` query suite
-- Reports findings to GitHub Security tab
-
-**How to read results:**
-
-1. Navigate to the Security tab in the repo
-2. Click "Code scanning alerts"
-3. Fix the highest severity issues first
-4. Don't ignore warnings just because they're annoying
-
-#### Secret Scanning Agent
-
-**File:** `.github/workflows/secret-scanning.yml`  
-**Runs:** On push to `main` and PRs  
-**Purpose:** Prevents you from committing your AWS keys (again)  
-**What it does:**
-
-- Scans the entire git history for leaked secrets
-- Checks for API keys, tokens, passwords, and other sensitive data
-- Blocks PRs if secrets are detected
-- Uses Gitleaks for detection
-
-**Pro tip:** If this catches something, rotate the credential immediately. It's already compromised.
+**Repository Type**: GitHub Action  
+**Primary Language**: JavaScript (CommonJS, Node.js 22+)  
+**Build Tool**: @vercel/ncc  
+**Testing**: Jest  
+**Linting**: ESLint 9 (flat config)  
+**Formatting**: Prettier  
+**CI/CD**: GitHub Actions  
+**Quality**: SonarCloud, CodeQL, Codecov  
+**Pre-commit**: Lefthook
 
 ---
 
-### 🏗️ Build & Quality Agents
+## 🎯 Action Purpose
 
-#### Setup Agent
+GitHub Action that delegates code changes to GitHub Copilot CLI, creates feature branches, commits changes, opens PRs, and assigns them to the workflow actor. No auto-merge. Human review required.
 
-**File:** `.github/workflows/ci.yml` (job: `setup`)  
-**Purpose:** Reads Volta config and sets Node version for all downstream jobs  
-**Outputs:**
+**Key Workflow**:
 
-- `node-version`: The Node.js version to use (defaults to 22 if not specified)
-
-#### Format Agent
-
-**File:** `.github/workflows/ci.yml` (job: `format`)  
-**Purpose:** Enforces code formatting standards  
-**What it checks:**
-
-- Runs `npm run format:check`
-- Validates Prettier formatting
-- Fails if code isn't formatted correctly
-
-**Fix it locally:** `npm run format`
-
-#### Lint Agent
-
-**File:** `.github/workflows/ci.yml` (job: `lint`)  
-**Purpose:** Catches code quality issues before they haunt you  
-**What it checks:**
-
-- Runs ESLint with configuration from `eslint.config.mjs`
-- Enforces code style and best practices
-- Validates Responsible AI commit footers via `@checkmarkdevtools/rai-lint`
-
-**Fix it locally:** `npm run lint`
-
-#### Build Agent
-
-**File:** `.github/workflows/ci.yml` (job: `build`)  
-**Purpose:** Compiles the action into a distributable format  
-**What it does:**
-
-- Runs `npm run build` (uses `@vercel/ncc`)
-- Creates the `dist/` directory
-- Uploads artifacts for 7 days
-- Ensures the action can actually be used
-
-**Important:** The `dist/` folder is committed to the repo because GitHub Actions needs it.
-
-#### Test Agent
-
-**File:** `.github/workflows/ci.yml` (job: `test`)  
-**Purpose:** Runs automated tests  
-**What it does:**
-
-- Executes `npm test`
-- Validates functionality
-- Currently just a placeholder (add real tests, you coward)
-
-#### Code Coverage Agent
-
-**File:** `.github/workflows/ci.yml` (job: `codecov`)  
-**Purpose:** Tracks test coverage  
-**What it does:**
-
-- Runs tests with coverage enabled
-- Uploads results to Codecov
-- Only runs on push to `main` (not on PRs)
-- Doesn't fail the build (yet)
-
-#### Quality Gate Agent
-
-**File:** `.github/workflows/ci.yml` (job: `gate`)  
-**Purpose:** Final validation that everything passed  
-**What it checks:**
-
-- Format agent: MUST pass
-- Lint agent: MUST pass
-- Build agent: MUST pass
-- Test agent: MUST pass
-
-If any agent fails, the quality gate fails. No merge for you.
+1. Validate optional file input
+2. Execute Copilot CLI with instructions
+3. Create timestamped branch
+4. Commit changes with conventional commit messages
+5. Run Copilot review pass
+6. Create PR with description
+7. Assign PR to workflow actor
 
 ---
 
-### 🚀 Release Agents
+## 🏗️ Architecture
 
-#### SonarCloud Agent
+### Entry Point
 
-**File:** `.github/workflows/sonarcloud.yml`  
-**Runs:** On push to `main` and PRs  
-**Purpose:** Code quality and security analysis  
-**What it does:**
+- `src/index.js`: Main action logic
+- `dist/index.js`: Compiled bundle (committed to repo, required by GitHub Actions)
 
-- Static code analysis
-- Detects code smells, bugs, and vulnerabilities
-- Tracks technical debt
-- Generates quality metrics
+### Core Functions
 
-**Dashboard:** https://sonarcloud.io/project/overview?id=ChecKMarKDevTools_delegate-action
+- `validateFilename()`: Sanitize and validate filename input (path traversal protection)
+- `validateFile()`: Check file existence, size limits (1MB max), and type
+- `runCopilot()`: Execute @github/copilot npm package with token and instructions
+- `createBranch()`: Create timestamped feature branch
+- `commitAndPush()`: Configure git, commit changes, push to remote
+- `createPullRequest()`: Use Octokit to create PR via GitHub API
+- `assignPR()`: Assign PR to workflow actor
 
-#### Release Please Agent
+### Security Measures
 
-**File:** `.github/workflows/release-please.yml`  
-**Runs:** On push to `main`  
-**Purpose:** Automated semantic versioning and releases  
-**What it does:**
-
-- Parses Conventional Commits
-- Generates CHANGELOG.md
-- Creates release PRs
-- Publishes GitHub releases
-- Bumps version in package.json
-
-**How it works:**
-
-1. You merge a PR with a commit like `feat: add new feature`
-2. Release Please opens a PR with the version bump
-3. When you merge that PR, it creates a GitHub release
-4. Magic happens
+- Input sanitization via `sanitize-filename` and `validator`
+- Path traversal prevention (rejects absolute paths and `..`)
+- File size limits (1MB) to prevent memory exhaustion
+- No shell execution of user input
+- Structured logging via `pino`
 
 ---
 
-## 🔧 Local Development
+## 📋 Inputs
 
-### Pre-commit Hooks
+| Name            | Required | Default | Validation                                  |
+| --------------- | -------- | ------- | ------------------------------------------- |
+| `PRIVATE_TOKEN` | Yes      | -       | Must be valid GitHub PAT                    |
+| `filename`      | No       | `''`    | Sanitized, no path traversal, max 255 chars |
+| `branch`        | No       | `main`  | Base branch for PR                          |
 
-**File:** `.lefthook.yml`  
-**Managed by:** Lefthook  
-**Runs automatically on:** `git commit`
+---
 
-**Hook order:**
+## 📤 Outputs
 
-1. **Format** (`npm run format`) - Auto-fixes formatting
-2. **Lint** (`npm run lint`) - Catches code issues
-3. **Test** (`npm test`) - Runs tests
+| Name        | Description         |
+| ----------- | ------------------- |
+| `pr_number` | Created PR number   |
+| `branch`    | Feature branch name |
 
-If any step fails, the commit is blocked. Fix it and try again.
+---
 
-**Install hooks:**
+## 🔄 CI/CD Agents
 
-```bash
-npm install  # Hooks are installed automatically via postinstall script
+### Setup Agent
+
+**Job**: `setup`  
+**Purpose**: Extract Node.js version from Volta configuration in package.json  
+**Outputs**: `node-version` (default: 22 if not found)
+
+### Format Agent
+
+**Job**: `format`  
+**Command**: `npm run format:check`  
+**Purpose**: Validate Prettier formatting compliance  
+**Blocking**: Yes
+
+### Lint Agent
+
+**Job**: `lint`  
+**Command**: `npm run lint`  
+**Purpose**: ESLint validation, Responsible AI commit footer enforcement  
+**Blocking**: Yes
+
+### Build Agent
+
+**Job**: `build`  
+**Command**: `npm run build`  
+**Purpose**: Compile action with @vercel/ncc into dist/  
+**Artifacts**: Uploads dist/ for 7 days  
+**Blocking**: Yes
+
+### Test Agent
+
+**Job**: `test`  
+**Command**: `npm test`  
+**Purpose**: Execute Jest test suite  
+**Coverage Target**: 70% (branches, functions, lines, statements)  
+**Blocking**: Yes
+
+### Code Coverage Agent
+
+**Job**: `codecov`  
+**Command**: `npm run test:coverage`  
+**Purpose**: Upload coverage to Codecov  
+**Runs**: Only on push to main (not PRs)  
+**Blocking**: No (fail_ci_if_error: false)
+
+### Quality Gate Agent
+
+**Job**: `gate`  
+**Purpose**: Final validation that all quality agents passed  
+**Dependencies**: format, lint, build, test  
+**Blocking**: Yes
+
+### CodeQL Security Agent
+
+**Workflow**: `.github/workflows/codeql.yml`  
+**Language**: JavaScript  
+**Query Suite**: security-and-quality  
+**Schedule**: Weekly (Mondays 00:00 UTC)  
+**Runs**: Push to main, PRs  
+**Blocking**: No (reports to Security tab)
+
+### Secret Scanning Agent
+
+**Workflow**: `.github/workflows/secret-scanning.yml`  
+**Tool**: Gitleaks v2  
+**Scope**: Full git history  
+**Runs**: Push to main, PRs  
+**Blocking**: Yes (prevents secret leaks)
+
+### SonarCloud Agent
+
+**Workflow**: `.github/workflows/sonarcloud.yml`  
+**Version**: v3.1.0 (pinned)  
+**Runs**: Push to main, PRs  
+**Metrics**: Code smells, bugs, vulnerabilities, tech debt  
+**Dashboard**: https://sonarcloud.io/project/overview?id=ChecKMarKDevTools_delegate-action
+
+### Release Please Agent
+
+**Workflow**: `.github/workflows/release-please.yml`  
+**Version**: v4  
+**Trigger**: Push to main  
+**Purpose**: Parse conventional commits, generate changelog, create release PRs, bump versions
+
+---
+
+## 🧪 Testing Strategy
+
+### Unit Tests
+
+**Location**: `__tests__/index.test.js`  
+**Framework**: Jest  
+**Mocking**: @actions/core, @actions/exec, @actions/github, fs, pino  
+**Coverage Target**: 70% minimum
+
+### Test Cases
+
+- Filename validation (empty, too long, absolute paths, traversal attempts, valid)
+- File validation (existence, size limits, file vs directory)
+- Copilot execution (version check, token passing, error handling)
+- Branch creation (new branch, existing branch fallback)
+- Commit/push (git config, change detection, no-change skip, error handling)
+- PR creation (API success, API errors)
+- PR assignment (API success, API errors)
+- Input validation (required token, default branch)
+
+### Coverage Thresholds
+
+```javascript
+{
+  global: {
+    branches: 70,
+    functions: 70,
+    lines: 70,
+    statements: 70
+  }
+}
 ```
 
-**Skip hooks (use sparingly):**
+---
+
+## 🔐 Security Guidelines
+
+**Input Validation**:
+
+- All filenames sanitized with `sanitize-filename`
+- Validator.js for additional validation
+- Reject absolute paths
+- Reject path traversal (`..`)
+- Max filename length: 255 characters
+- Max file size: 1MB
+
+**Secret Management**:
+
+- Never log secrets
+- Use GitHub secrets for tokens
+- Gitleaks scans every commit
+- CodeQL weekly SAST
+
+**Permissions**:
+
+- CI: `contents: read`, `pull-requests: write`, `checks: write`
+- CodeQL: `actions: read`, `contents: read`, `security-events: write`
+- Secret Scanning: `contents: read`, `security-events: write`
+- Release Please: `contents: write`, `pull-requests: write`
+
+---
+
+## 📝 Code Style Rules
+
+**ESLint**:
+
+- ECMAScript 2024
+- CommonJS modules
+- Prettier integration
+- No unused vars (except prefixed with `_`)
+- Console allowed (structured logging via pino)
+
+**Prettier**:
+
+- Auto-format via lefthook pre-commit hook
+- Targets: `*.{js,json,md,yml,yaml}`
+
+**Commitlint**:
+
+- Conventional Commits enforced
+- Responsible AI attribution required via `@checkmarkdevtools/commitlint-plugin-rai`
+- Allowed types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+
+---
+
+## 🛠️ Development Workflow
+
+**Setup**:
 
 ```bash
-git commit --no-verify
+npm install  # Installs deps + lefthook hooks
 ```
+
+**Build**:
+
+```bash
+npm run build  # Compiles to dist/
+```
+
+**Lint**:
+
+```bash
+npm run lint  # ESLint check
+```
+
+**Format**:
+
+```bash
+npm run format        # Auto-fix
+npm run format:check  # Check only
+```
+
+**Test**:
+
+```bash
+npm test              # Run tests
+npm run test:coverage # With coverage
+```
+
+**Pre-commit Hooks** (Lefthook):
+
+1. Format (auto-fixes)
+2. Lint (must pass)
+3. Test (must pass)
 
 ---
 
 ## 🎮 Agent Coordination
-
-The agents run in parallel when possible, with strategic dependencies:
 
 ```
 setup
@@ -206,90 +298,157 @@ setup
 ├── lint ──────┤
 ├── build ─────┼──> gate
 └── test ──────┘
-     └── codecov (push only)
+     └── codecov (main only)
 ```
 
-**Key points:**
-
-- All quality agents depend on `setup` for Node version
-- `gate` waits for all quality agents to finish
-- `codecov` only runs after `test` succeeds (and only on `main`)
-- Security agents (CodeQL, Secret Scanning) run independently
+**Parallel Execution**: format, lint, build, test all run in parallel after setup  
+**Quality Gate**: Blocks merge if any quality agent fails  
+**Coverage Upload**: Only after test succeeds on main branch
 
 ---
 
-## 📊 Monitoring & Dashboards
+## 📊 Quality Metrics
 
-- **GitHub Actions:** Check the Actions tab for workflow runs
-- **CodeQL:** Security tab → Code scanning alerts
-- **SonarCloud:** https://sonarcloud.io/project/overview?id=ChecKMarKDevTools_delegate-action
-- **Codecov:** Badge in README (when it exists)
+**Required for Merge**:
 
----
+- ✅ Format check passes
+- ✅ Lint check passes
+- ✅ Build succeeds
+- ✅ Tests pass (70% coverage minimum)
+- ✅ No secrets detected
+- ✅ Quality gate passes
 
-## 🚨 When Things Break
+**Advisory** (non-blocking):
 
-### "Quality gate failed"
-
-One of the agents failed. Check the logs:
-
-1. Click the failed workflow run
-2. Expand the failed job
-3. Read the error (I know, shocking)
-4. Fix the issue locally
-5. Push again
-
-### "CodeQL found vulnerabilities"
-
-1. Go to Security tab
-2. Read the alert
-3. Fix the code
-4. Push the fix
-5. Re-scan will happen automatically
-
-### "Secret detected"
-
-**STOP EVERYTHING.**
-
-1. Identify the leaked secret
-2. Rotate it immediately
-3. Remove it from git history (`git filter-branch` or BFG Repo-Cleaner)
-4. Push the cleaned history
-5. Never speak of this again
-
-### "Release Please won't create a release"
-
-You probably didn't follow Conventional Commits:
-
-- ✅ `feat: add new feature`
-- ✅ `fix: resolve bug`
-- ❌ `added new feature`
-- ❌ `bug fix`
+- CodeQL security alerts
+- SonarCloud quality metrics
+- Codecov coverage trends
 
 ---
 
-## 🤝 Contributing
+## 🚨 Error Handling Patterns
 
-When adding new agents:
+**Graceful Degradation**:
 
-1. Keep them focused (one job, one responsibility)
-2. Make them fast (< 10 minutes)
-3. Make them loud (fail fast, fail clearly)
-4. Document them here
-5. Add appropriate permissions
-6. Set reasonable timeouts
+- Copilot execution errors → log warning, continue
+- Commit errors (no changes) → log info, skip
+- PR assignment errors → log warning, continue
+
+**Hard Failures**:
+
+- Missing PRIVATE_TOKEN → setFailed
+- Invalid filename → setFailed
+- File too large → setFailed
+- PR creation fails → return null, log error
+
+**Logging**:
+
+- Use `pino` for structured JSON logs
+- Include context (filename, branch, error messages)
+- No secrets in logs
+
+---
+
+## 🔧 Build Artifacts
+
+**Compiled Output**:
+
+- `dist/index.js`: Single bundled file created by @vercel/ncc
+- **Must be committed to repo** (GitHub Actions requirement)
+- Generated via `npm run build`
+
+**Excluded from Bundle**:
+
+- node_modules (bundled into dist)
+- Tests
+- Dev dependencies
+
+---
+
+## 📦 Dependencies
+
+**Production**:
+
+- `@actions/core@^2.0.2`: GitHub Actions core utilities
+- `@actions/exec@^2.0.0`: Execute shell commands
+- `@actions/github@^7.0.0`: Octokit GitHub API client
+- `pino@^10.2.0`: Structured logging
+- `pino-pretty@^13.1.3`: Log formatting
+- `sanitize-filename@^1.6.3`: Filename sanitization
+- `validator@^13.15.26`: Input validation
+
+**Development**:
+
+- `jest@^29.7.0`: Testing framework
+- `eslint@^9.39.2`: Linting
+- `prettier@^3.3.3`: Code formatting
+- `@vercel/ncc@^0.38.3`: Bundler
+- `@commitlint/*@^20.3.1`: Commit message validation
+- `lefthook@^2.0.15`: Git hooks
+
+---
+
+## 🎯 AI Agent Instructions
+
+When working in this repository:
+
+1. **Never** modify CI configuration without explicit request
+2. **Always** export functions in `src/index.js` for testability
+3. **Always** update tests when changing functionality
+4. **Always** run validation loop before completion:
+   - `npm run format`
+   - `npm run lint`
+   - `npm run build`
+   - `npm test`
+5. **Always** maintain 70%+ test coverage
+6. **Never** commit secrets or sensitive data
+7. **Always** use conventional commits with RAI attribution
+8. **Always** update dist/ after src/ changes
+9. **Never** introduce breaking changes without major version bump
+10. **Always** validate inputs for security (path traversal, size limits)
+
+---
+
+## 🔍 Common Tasks
+
+**Add new feature**:
+
+1. Update `src/index.js`
+2. Export new functions in module.exports
+3. Add tests in `__tests__/index.test.js`
+4. Run `npm run build` to update dist/
+5. Verify coverage: `npm run test:coverage`
+6. Commit with conventional commit + RAI footer
+
+**Fix bug**:
+
+1. Write failing test
+2. Fix implementation
+3. Verify test passes
+4. Run full validation loop
+5. Update dist/
+
+**Update dependencies**:
+
+1. Run `npm outdated`
+2. Update package.json versions
+3. Run `npm install`
+4. Test thoroughly
+5. Update dist/
+6. Commit with `build:` prefix
 
 ---
 
 ## 📚 Further Reading
 
+- [GitHub Actions Toolkit](https://github.com/actions/toolkit)
 - [Conventional Commits](https://www.conventionalcommits.org/)
+- [Jest Documentation](https://jestjs.io/)
+- [ESLint Flat Config](https://eslint.org/docs/latest/use/configure/configuration-files)
 - [Lefthook Documentation](https://github.com/evilmartians/lefthook)
-- [GitHub Actions Security Best Practices](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions)
-- [CodeQL Documentation](https://codeql.github.com/docs/)
 
 ---
 
-**Remember:** These agents work for you, not the other way around. If they're noisy, fix the root cause. If they're broken, fix them. If they're missing something important, add it.
-
-Now go forth and ship.
+**Last Updated**: 2026-01-17  
+**Node Version**: 22.13.1 (Volta)  
+**Action Version**: 1.0.0
