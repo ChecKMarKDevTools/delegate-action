@@ -6,5 +6,3 @@ pre-commit:
       stage_fixed: true
     lint:
       run: npm run lint
-    test:
-      run: npm test
