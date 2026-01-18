@@ -39,8 +39,11 @@ Thumbs.db
 
 # Coverage
 coverage/
+.coverage
 *.lcov
 .nyc_output
+.c8rc
+coverage.json
 
 # Misc
 .cache/

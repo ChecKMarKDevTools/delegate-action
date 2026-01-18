@@ -134,7 +134,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [setup, test]
-    if: github.event_name == 'push'
 
     steps:
       - name: Checkout code
@@ -149,14 +148,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate coverage
+      - name: Generate coverage report
         run: npm run test:coverage
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
+          file: ./coverage/coverage-final.json
+          flags: unittests
+          name: codecov-umbrella
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
+          verbose: true
 
   gate:
     name: Quality Gate
