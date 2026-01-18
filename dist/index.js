@@ -39928,6 +39928,52 @@ const logger = pino({
 const MAX_INSTRUCTION_LENGTH = 500;
 const MAX_FILE_SIZE = 1024 * 1024;
 
+const PROMPT_INJECTION_PATTERNS = [
+  /ignore\s+(all\s+)?previous\s+(instructions?|prompts?|commands?)/gi,
+  /disregard\s+(all\s+)?previous\s+(instructions?|prompts?|commands?)/gi,
+  /forget\s+(all\s+)?previous\s+(instructions?|prompts?|commands?)/gi,
+  /new\s+(instructions?|prompts?|commands?):/gi,
+  /system\s+(prompt|message|instruction):/gi,
+  /you\s+are\s+now\s+(a|an)/gi,
+  /from\s+now\s+on\s+you\s+(are|will)/gi,
+  /\[SYSTEM\]/gi,
+  /\[ADMIN\]/gi,
+  /\[OVERRIDE\]/gi,
+  /<\s*system\s*>/gi,
+  /<\s*admin\s*>/gi,
+];
+
+/**
+ * Detect and prevent AI prompt injection attempts
+ * @param {string} text - Text to validate
+ * @returns {Object} Validation result with isValid and reason
+ */
+function detectPromptInjection(text) {
+  if (!text || typeof text !== 'string') {
+    return { isValid: false, reason: 'Invalid input: text must be a non-empty string' };
+  }
+
+  for (const pattern of PROMPT_INJECTION_PATTERNS) {
+    if (pattern.test(text)) {
+      logger.warn({ pattern: pattern.source }, 'Potential prompt injection attempt detected');
+      return {
+        isValid: false,
+        reason: 'Instruction contains patterns that could manipulate AI behavior',
+      };
+    }
+  }
+
+  const suspiciousCharCount = (text.match(/[<>{}[\]]/g) || []).length;
+  if (suspiciousCharCount > text.length * 0.1) {
+    return {
+      isValid: false,
+      reason: 'Excessive use of special characters detected',
+    };
+  }
+
+  return { isValid: true };
+}
+
 /**
  * Validate and sanitize a filename
  * @param {string} filename - The filename to sanitize
@@ -39993,6 +40039,12 @@ async function validateFile(filename) {
  */
 async function runCopilot(token, instructions) {
   logger.info('Checking GitHub Copilot CLI installation');
+
+  const injectionCheck = detectPromptInjection(instructions);
+  if (!injectionCheck.isValid) {
+    logger.error({ reason: injectionCheck.reason }, 'Prompt injection detected');
+    throw new Error(`Security: ${injectionCheck.reason}`);
+  }
 
   try {
     let copilotVersion = '';
@@ -40226,6 +40278,7 @@ if (require.main === require.cache[eval('__filename')]) {
 }
 
 module.exports = {
+  detectPromptInjection,
   validateFilename,
   validateFile,
   runCopilot,
