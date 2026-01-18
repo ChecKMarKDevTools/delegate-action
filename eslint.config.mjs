@@ -9,16 +9,11 @@ export default [
     files: ['**/*.js'],
     languageOptions: {
       ecmaVersion: 2024,
-      sourceType: 'commonjs',
+      sourceType: 'module',
       globals: {
         console: 'readonly',
         process: 'readonly',
         Buffer: 'readonly',
-        __dirname: 'readonly',
-        __filename: 'readonly',
-        module: 'readonly',
-        require: 'readonly',
-        exports: 'readonly',
       },
     },
     plugins: {

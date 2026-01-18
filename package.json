@@ -2,14 +2,14 @@
   "name": "delegate-action",
   "version": "1.0.0",
   "description": "A GitHub Action that uses Copilot CLI to delegate tasks, create PRs, and assign reviewers",
+  "type": "module",
   "main": "src/index.js",
   "scripts": {
     "build": "ncc build src/index.js -o dist",
     "lint": "eslint src/**/*.js",
     "format": "prettier --write \"**/*.{js,json,md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{js,json,md,yml,yaml}\"",
-    "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
+    "test": "vitest run --coverage",
     "test:watch": "vitest",
     "prepare": "lefthook install"
   },
