@@ -2,7 +2,7 @@
 node_modules/
 
 # Build output
-# dist/ - Keep dist for GitHub Actions
+!dist/ # Keep dist for GitHub Actions
 
 # Logs
 logs/
