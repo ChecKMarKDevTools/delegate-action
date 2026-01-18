@@ -18,11 +18,43 @@ jest.mock('pino', () => {
   return jest.fn(() => mockLogger);
 });
 
+const mockSession = {
+  sessionId: 'mock-session-id',
+  on: jest.fn(),
+  sendAndWait: jest.fn().mockResolvedValue({}),
+  destroy: jest.fn().mockResolvedValue(undefined),
+};
+
+const mockClient = {
+  start: jest.fn().mockResolvedValue(undefined),
+  createSession: jest.fn().mockResolvedValue(mockSession),
+  stop: jest.fn().mockResolvedValue([]),
+  forceStop: jest.fn().mockResolvedValue(undefined),
+};
+
+const MockCopilotClient = jest.fn(() => mockClient);
+
+const mockGetCopilotClient = jest.fn(async () => MockCopilotClient);
+
+jest.mock('../src/copilot-loader', () => {
+  return {
+    getCopilotClient: (...args) => mockGetCopilotClient(...args),
+  };
+});
+
 const index = require('../src/index');
 
 describe('Delegate Action', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetCopilotClient.mockResolvedValue(MockCopilotClient);
+    MockCopilotClient.mockReturnValue(mockClient);
+    mockClient.start.mockResolvedValue(undefined);
+    mockClient.createSession.mockResolvedValue(mockSession);
+    mockClient.stop.mockResolvedValue([]);
+    mockClient.forceStop.mockResolvedValue(undefined);
+    mockSession.sendAndWait.mockResolvedValue({});
+    mockSession.destroy.mockResolvedValue(undefined);
     process.env.GITHUB_REPOSITORY = 'owner/repo';
     process.env.GITHUB_ACTOR = 'test-user';
   });
@@ -48,19 +80,53 @@ describe('Delegate Action', () => {
   });
 
   describe('runCopilot', () => {
-    test('should execute Copilot with token and instructions', async () => {
-      exec.exec.mockResolvedValue(0);
-
+    test('should execute Copilot SDK with token and instructions', async () => {
       await index.runCopilot('fake-token', 'test instructions');
 
-      expect(exec.exec).toHaveBeenCalled();
+      expect(MockCopilotClient).toHaveBeenCalled();
+      expect(mockClient.start).toHaveBeenCalled();
+      expect(mockClient.createSession).toHaveBeenCalled();
+      expect(mockSession.sendAndWait).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: 'test instructions',
+        }),
+        300000
+      );
+      expect(mockSession.destroy).toHaveBeenCalled();
+      expect(mockClient.stop).toHaveBeenCalled();
     });
 
-    test('should handle Copilot execution errors gracefully', async () => {
-      exec.exec.mockRejectedValue(new Error('Copilot failed'));
+    test('should handle Copilot SDK execution errors gracefully', async () => {
+      mockClient.start.mockRejectedValueOnce(new Error('Copilot failed'));
 
-      await index.runCopilot('fake-token', 'test instructions');
+      await expect(index.runCopilot('fake-token', 'test instructions')).rejects.toThrow(
+        'Copilot failed'
+      );
       expect(core.warning).toHaveBeenCalled();
+      expect(mockClient.forceStop).toHaveBeenCalled();
+
+      mockClient.start.mockResolvedValue(undefined);
+    });
+
+    test('should attach instruction file when provided', async () => {
+      const fs = require('fs');
+      fs.existsSync = jest.fn().mockReturnValue(true);
+      fs.statSync = jest.fn().mockReturnValue({ size: 100, isFile: () => true });
+
+      await index.runCopilot('fake-token', 'test instructions', '/path/to/file.txt');
+
+      expect(mockSession.sendAndWait).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: 'test instructions',
+          attachments: expect.arrayContaining([
+            expect.objectContaining({
+              type: 'file',
+              path: '/path/to/file.txt',
+            }),
+          ]),
+        }),
+        300000
+      );
     });
   });
 

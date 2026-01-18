@@ -6,6 +6,7 @@ const path = require('path');
 const sanitizeFilename = require('sanitize-filename');
 const validator = require('validator');
 const pino = require('pino');
+const { getCopilotClient } = require('./copilot-loader');
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -19,7 +20,6 @@ const logger = pino({
   },
 });
 
-const MAX_INSTRUCTION_LENGTH = 500;
 const MAX_FILE_SIZE = 1024 * 1024;
 
 /**
@@ -80,48 +80,101 @@ async function validateFile(filename) {
 }
 
 /**
- * Run GitHub Copilot CLI command
+ * Run GitHub Copilot SDK with instructions
  * @param {string} token - GitHub token
  * @param {string} instructions - Instructions to follow
+ * @param {string|null} instructionFile - Optional file path to attach as context
  * @returns {Promise<void>}
  */
-async function runCopilot(token, instructions) {
-  logger.info('Checking GitHub Copilot CLI installation');
+async function runCopilot(token, instructions, instructionFile = null) {
+  logger.info('Initializing GitHub Copilot SDK');
+
+  const CopilotClient = await getCopilotClient();
+
+  const client = new CopilotClient({
+    logLevel: 'info',
+    autoStart: true,
+    autoRestart: true,
+  });
 
   try {
-    let copilotVersion = '';
-    await exec.exec('npx', ['@github/copilot', '--version'], {
-      ignoreReturnCode: true,
-      listeners: {
-        stdout: (data) => {
-          copilotVersion = data.toString().trim();
-        },
+    await client.start();
+    logger.info('Copilot client started successfully');
+
+    const session = await client.createSession({
+      model: 'gpt-5',
+      streaming: true,
+      onPermissionRequest: async (request) => {
+        logger.info({ requestKind: request.kind }, 'Permission requested');
+
+        switch (request.kind) {
+          case 'read':
+            return { kind: 'approved' };
+          case 'write':
+            return { kind: 'approved' };
+          case 'shell':
+            return { kind: 'approved' };
+          default:
+            logger.warn({ requestKind: request.kind }, 'Unknown permission request kind');
+            return { kind: 'approved' };
+        }
       },
     });
 
-    if (copilotVersion) {
-      logger.info({ version: copilotVersion }, 'GitHub Copilot CLI is available');
-    } else {
-      logger.warn('GitHub Copilot CLI not found, installing...');
-      await exec.exec('npm', ['install', '-g', '@github/copilot']);
-      logger.info('GitHub Copilot CLI installed successfully');
+    logger.info({ sessionId: session.sessionId }, 'Session created');
+
+    session.on((event) => {
+      switch (event.type) {
+        case 'assistant.message_delta':
+          process.stdout.write(event.data.deltaContent);
+          break;
+        case 'assistant.message':
+          logger.info('Assistant response completed');
+          break;
+        case 'tool.execution_start':
+          logger.info({ toolName: event.data.toolName }, 'Tool execution started');
+          break;
+        case 'tool.execution_end':
+          logger.info({ toolName: event.data.toolName }, 'Tool execution completed');
+          break;
+        case 'session.error':
+          logger.error({ error: event.data.message }, 'Session error');
+          break;
+      }
+    });
+
+    const messageOptions = {
+      prompt: instructions,
+    };
+
+    if (instructionFile) {
+      messageOptions.attachments = [
+        {
+          type: 'file',
+          path: instructionFile,
+          displayName: path.basename(instructionFile),
+        },
+      ];
     }
 
-    logger.info({ instructionsLength: instructions.length }, 'Executing Copilot CLI');
+    logger.info({ instructionsLength: instructions.length }, 'Sending message to Copilot');
+    await session.sendAndWait(messageOptions, 300000);
 
-    await exec.exec('npx', ['@github/copilot'], {
-      input: Buffer.from(instructions),
-      env: {
-        ...process.env,
-        GH_TOKEN: token,
-        GITHUB_TOKEN: token,
-      },
-    });
+    logger.info('Copilot execution completed successfully');
 
-    logger.info('Copilot CLI execution completed');
+    await session.destroy();
+    await client.stop();
   } catch (error) {
-    logger.error({ error: error.message }, 'Copilot CLI execution failed');
-    core.warning(`Copilot CLI execution failed: ${error.message}`);
+    logger.error({ error: error.message, stack: error.stack }, 'Copilot SDK execution failed');
+    core.warning(`Copilot SDK execution failed: ${error.message}`);
+
+    try {
+      await client.forceStop();
+    } catch (stopError) {
+      logger.error({ error: stopError.message }, 'Failed to stop Copilot client');
+    }
+
+    throw error;
   }
 }
 
@@ -265,12 +318,13 @@ async function run() {
     );
 
     let instructions = 'Analyze the repository and suggest improvements';
+    let instructionFilePath = null;
 
     if (filename) {
       try {
-        const filePath = await validateFile(filename);
-        const fileContent = fs.readFileSync(filePath, 'utf8');
-        instructions = `Process the following instructions from ${filename}:\n${fileContent.substring(0, MAX_INSTRUCTION_LENGTH)}`;
+        instructionFilePath = await validateFile(filename);
+        const fileContent = fs.readFileSync(instructionFilePath, 'utf8');
+        instructions = fileContent;
         logger.info(
           { filename, instructionsLength: instructions.length },
           'Loaded instructions from file'
@@ -282,13 +336,19 @@ async function run() {
       }
     }
 
-    await runCopilot(privateToken, instructions);
+    await runCopilot(privateToken, instructions, instructionFilePath);
     await createBranch(newBranch);
-    await commitAndPush(`feat: delegate action changes for ${filename || 'repository'}`, newBranch);
+    await commitAndPush(
+      `feat: delegate action changes\n\nGenerated with GitHub Copilot as directed by @${context.actor}`,
+      newBranch
+    );
 
     const reviewInstructions = `Review the changes in branch ${newBranch}, create documentation for new features, and suggest test cases`;
     await runCopilot(privateToken, reviewInstructions);
-    await commitAndPush('docs: add documentation and tests', newBranch);
+    await commitAndPush(
+      `docs: add documentation and tests\n\nGenerated with GitHub Copilot as directed by @${context.actor}`,
+      newBranch
+    );
 
     const prNumber = await createPullRequest(
       privateToken,
@@ -297,10 +357,12 @@ async function run() {
       `Delegate: ${filename || 'Repository changes'}`,
       `## Automated changes by Delegate Action\n\n` +
         `This PR was automatically created by the delegate-action.\n\n` +
-        `${filename ? `**File processed:** \`${filename}\`\n\n` : ''}` +
+        `${filename ? `**Prompt file:** \`${filename}\`\n\n` : ''}` +
         `**Base branch:** \`${baseBranch}\`\n` +
         `**Created by:** @${context.actor}\n\n` +
-        `Please review the changes carefully before merging.`
+        `Please review the changes carefully before merging.\n\n` +
+        `---\n\n` +
+        `_Generated with GitHub Copilot as directed by @${context.actor}_`
     );
 
     if (prNumber) {
