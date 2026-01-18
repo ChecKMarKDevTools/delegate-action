@@ -1,12 +1,12 @@
-const core = require('@actions/core');
-const exec = require('@actions/exec');
-const github = require('@actions/github');
-const fs = require('fs');
-const path = require('path');
-const sanitizeFilename = require('sanitize-filename');
-const validator = require('validator');
-const pino = require('pino');
-const { getCopilotClient } = require('./copilot-loader');
+import * as core from '@actions/core';
+import * as exec from '@actions/exec';
+import * as github from '@actions/github';
+import fs from 'fs';
+import path from 'path';
+import sanitizeFilename from 'sanitize-filename';
+import validator from 'validator';
+import pino from 'pino';
+import { getCopilotClient } from './copilot-loader.js';
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -23,18 +23,18 @@ const logger = pino({
 const MAX_FILE_SIZE = 1024 * 1024;
 
 const PROMPT_INJECTION_PATTERNS = [
-  /ignore\s+(all\s+)?previous\s+(instructions?|prompts?|commands?)/gi,
-  /disregard\s+(all\s+)?previous\s+(instructions?|prompts?|commands?)/gi,
-  /forget\s+(all\s+)?previous\s+(instructions?|prompts?|commands?)/gi,
-  /new\s+(instructions?|prompts?|commands?):/gi,
-  /system\s+(prompt|message|instruction):/gi,
-  /you\s+are\s+now\s+(a|an)/gi,
-  /from\s+now\s+on\s+you\s+(are|will)/gi,
-  /\[SYSTEM\]/gi,
-  /\[ADMIN\]/gi,
-  /\[OVERRIDE\]/gi,
-  /<\s*system\s*>/gi,
-  /<\s*admin\s*>/gi,
+  /ignore\s+(all\s+)?previous\s+(instructions?|prompts?|commands?)/i,
+  /disregard\s+(all\s+)?previous\s+(instructions?|prompts?|commands?)/i,
+  /forget\s+(all\s+)?previous\s+(instructions?|prompts?|commands?)/i,
+  /new\s+(instructions?|prompts?|commands?):/i,
+  /system\s+(prompt|message|instruction):/i,
+  /you\s+are\s+now\s+(a|an)/i,
+  /from\s+now\s+on\s+you\s+(are|will)/i,
+  /\[SYSTEM\]/i,
+  /\[ADMIN\]/i,
+  /\[OVERRIDE\]/i,
+  /<\s*system\s*>/i,
+  /<\s*admin\s*>/i,
 ];
 
 /**
@@ -78,18 +78,19 @@ function validateFilename(filename) {
     throw new Error('Filename must be between 1 and 255 characters');
   }
 
+  // Check for absolute paths and path traversal BEFORE sanitization
+  if (path.isAbsolute(filename)) {
+    throw new Error('Absolute paths are not allowed');
+  }
+
+  if (filename.includes('..')) {
+    throw new Error('Path traversal detected');
+  }
+
   const sanitized = sanitizeFilename(filename, { replacement: '_' });
 
   if (sanitized !== filename) {
     logger.warn({ original: filename, sanitized }, 'Filename was sanitized');
-  }
-
-  if (path.isAbsolute(sanitized)) {
-    throw new Error('Absolute paths are not allowed');
-  }
-
-  if (sanitized.includes('..')) {
-    throw new Error('Path traversal detected');
   }
 
   return sanitized;
@@ -133,6 +134,12 @@ async function validateFile(filename) {
  * @returns {Promise<void>}
  */
 async function runCopilot(token, instructions, instructionFile = null) {
+  const injectionCheck = detectPromptInjection(instructions);
+  if (!injectionCheck.isValid) {
+    logger.error({ reason: injectionCheck.reason }, 'Prompt injection detected');
+    throw new Error(`Security: ${injectionCheck.reason}`);
+  }
+
   logger.info('Initializing GitHub Copilot SDK');
 
   const CopilotClient = await getCopilotClient();
@@ -142,12 +149,6 @@ async function runCopilot(token, instructions, instructionFile = null) {
     autoStart: true,
     autoRestart: true,
   });
-
-  const injectionCheck = detectPromptInjection(instructions);
-  if (!injectionCheck.isValid) {
-    logger.error({ reason: injectionCheck.reason }, 'Prompt injection detected');
-    throw new Error(`Security: ${injectionCheck.reason}`);
-  }
 
   try {
     await client.start();
@@ -429,11 +430,11 @@ async function run() {
   }
 }
 
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   run();
 }
 
-module.exports = {
+export {
   detectPromptInjection,
   validateFilename,
   validateFile,
