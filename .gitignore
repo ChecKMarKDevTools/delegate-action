@@ -52,3 +52,11 @@ temp/
 
 # Lefthook
 .lefthook/
+
+# Security scanning
+.gitleaks/
+gitleaks-report.json
+gitleaks-report.sarif
+
+# Commit messages
+commit.tmp

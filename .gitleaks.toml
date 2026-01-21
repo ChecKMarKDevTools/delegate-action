@@ -1,0 +1,12 @@
+title = "Gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allowlist for false positives"
+paths = [
+  '''dist/''',
+  '''node_modules/''',
+  '''coverage/''',
+]

@@ -1,9 +1,6 @@
 name: SonarCloud Analysis
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
     types: [opened, synchronize, reopened]
 
@@ -15,6 +12,7 @@ jobs:
     name: SonarCloud
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    if: github.event.pull_request.draft == false
 
     steps:
       - uses: actions/checkout@v6

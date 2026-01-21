@@ -7,5 +7,8 @@ pre-commit:
     lint:
       run: npm run lint
       stage_fixed: true
+
+pre-push:
+  commands:
     test:
-      run: '[ -n "$SKIP_PRECOMMIT_TESTS" ] || npm run test -- --run --reporter=verbose'
+      run: npm test
