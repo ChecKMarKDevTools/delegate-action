@@ -59,6 +59,11 @@ describe('Delegate Action', () => {
       expect(() => validateFilename('a'.repeat(256))).toThrow('between 1 and 255');
     });
 
+    test('rejects absolute paths', async () => {
+      const { validateFilename } = await import('../src/index.js');
+      expect(() => validateFilename('/etc/passwd')).toThrow('Absolute paths are not allowed');
+    });
+
     test('rejects path traversal', async () => {
       const { validateFilename } = await import('../src/index.js');
       expect(() => validateFilename('../etc/passwd')).toThrow('Path traversal');
@@ -95,11 +100,6 @@ describe('Delegate Action', () => {
     test('throws on missing file', async () => {
       const { validateFile } = await import('../src/index.js');
       await expect(validateFile('nonexistent.txt')).rejects.toThrow('File not found');
-    });
-
-    test('throws on absolute path', async () => {
-      const { validateFilename } = await import('../src/index.js');
-      expect(() => validateFilename('/etc/passwd')).toThrow('Absolute paths are not allowed');
     });
 
     test('throws on oversized file', async () => {
