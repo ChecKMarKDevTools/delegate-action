@@ -137,22 +137,3 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
           verbose: true
-
-  gate:
-    name: Quality Gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: [format, lint, build, test]
-    if: always()
-
-    steps:
-      - name: Check all jobs passed
-        run: |
-          if [[ "${{ needs.format.result }}" != "success" ]] || \
-             [[ "${{ needs.lint.result }}" != "success" ]] || \
-             [[ "${{ needs.build.result }}" != "success" ]] || \
-             [[ "${{ needs.test.result }}" != "success" ]]; then
-            echo "Quality gate failed"
-            exit 1
-          fi
-          echo "Quality gate passed"
