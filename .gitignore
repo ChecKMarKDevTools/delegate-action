@@ -1,0 +1,62 @@
+# Dependencies
+node_modules/
+
+# Build output
+!dist/ # Keep dist for GitHub Actions
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+pnpm-debug.log*
+*.tmp
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# Environment files
+.env*
+!.env.test
+
+# Coverage
+coverage/
+.coverage
+*.lcov
+.nyc_output
+.c8rc
+coverage.json
+
+# Misc
+.cache/
+tmp/
+temp/
+
+# Lefthook
+.lefthook/
+
+# Security scanning
+.gitleaks/
+gitleaks-report.json
+gitleaks-report.sarif
+
+# Commit messages
+commit.tmp
