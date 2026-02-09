@@ -30,7 +30,7 @@ jobs:
       - name: Read Volta configuration
         id: volta
         run: |
-          NODE_VERSION=$(jq -r '.volta.node // "20"' package.json)
+          NODE_VERSION=$(jq -r '.engines.node // "20"' package.json)
           echo "node-version=$NODE_VERSION" >> "$GITHUB_OUTPUT"
 
   format:
