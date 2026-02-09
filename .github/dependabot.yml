@@ -1,6 +1,5 @@
 version: 2
 updates:
-  # GitHub Actions
   - package-ecosystem: 'github-actions'
     directory: '/'
     schedule:
@@ -10,7 +9,6 @@ updates:
       - 'dependencies'
       - 'github-actions'
 
-  # npm
   - package-ecosystem: 'npm'
     directory: '/'
     schedule:
@@ -20,3 +18,15 @@ updates:
       - 'dependencies'
       - 'npm'
     versioning-strategy: increase
+    groups:
+      all-minor-patch:
+        patterns:
+          - '*'
+        update-types:
+          - patch
+          - minor
+      all-major:
+        patterns:
+          - '*'
+        update-types:
+          - major
