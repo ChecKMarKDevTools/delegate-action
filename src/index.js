@@ -162,9 +162,7 @@ async function runCopilot(token, instructions, instructionFile = null) {
 
         switch (request.kind) {
           case 'read':
-            return { kind: 'approved' };
           case 'write':
-            return { kind: 'approved' };
           case 'shell':
             return { kind: 'approved' };
           default:
@@ -305,8 +303,8 @@ async function createPullRequest(token, branch, baseBranch, title, body) {
     const { data: pr } = await octokit.rest.pulls.create({
       owner: context.repo.owner,
       repo: context.repo.repo,
-      title: title,
-      body: body,
+      title,
+      body,
       head: branch,
       base: baseBranch,
     });

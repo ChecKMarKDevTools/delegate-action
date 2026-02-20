@@ -1,5 +1,9 @@
 import { vi } from 'vitest';
 
+// Each vi.resetModules() + reimport of src/index.js creates a new pino instance
+// that adds process event listeners. Raise the limit to avoid false-positive warnings.
+process.setMaxListeners(50);
+
 const mocks = vi.hoisted(() => {
   const mockCopilotClient = class {
     started = false;
