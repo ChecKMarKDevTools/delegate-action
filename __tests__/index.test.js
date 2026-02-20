@@ -1,6 +1,5 @@
-import './mocks.js';
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as fs from 'fs';
+import * as fs from 'node:fs';
 import { mockCore, mockExec, mockGitHub, mockCopilotLoader } from './mocks.js';
 
 describe('Delegate Action', () => {
@@ -156,7 +155,7 @@ describe('Delegate Action', () => {
           async start() {
             throw new Error('Start failed');
           }
-          async forceStop() {}
+          forceStop() {}
         }
       );
       const { runCopilot } = await import('../src/index.js');
@@ -167,7 +166,7 @@ describe('Delegate Action', () => {
       let permissionHandler;
       mockCopilotLoader.getCopilotClient.mockResolvedValueOnce(
         class {
-          async start() {}
+          start() {}
           async createSession(options) {
             permissionHandler = options.onPermissionRequest;
             return {
@@ -177,8 +176,8 @@ describe('Delegate Action', () => {
               destroy: vi.fn(),
             };
           }
-          async stop() {}
-          async forceStop() {}
+          stop() {}
+          forceStop() {}
         }
       );
       const { runCopilot } = await import('../src/index.js');
@@ -194,7 +193,7 @@ describe('Delegate Action', () => {
       let eventHandler;
       mockCopilotLoader.getCopilotClient.mockResolvedValueOnce(
         class {
-          async start() {}
+          start() {}
           async createSession() {
             return {
               sessionId: 'test',
@@ -205,8 +204,8 @@ describe('Delegate Action', () => {
               destroy: vi.fn(),
             };
           }
-          async stop() {}
-          async forceStop() {}
+          stop() {}
+          forceStop() {}
         }
       );
       const { runCopilot } = await import('../src/index.js');
@@ -263,9 +262,7 @@ describe('Delegate Action', () => {
     });
 
     test('skips when no changes', async () => {
-      mockExec.exec.mockImplementation((cmd, args) =>
-        args?.includes('diff-index') ? Promise.resolve(0) : Promise.resolve(0)
-      );
+      mockExec.exec.mockResolvedValue(0);
       const { commitAndPush } = await import('../src/index.js');
       await commitAndPush('msg', 'branch');
       expect(mockExec.exec).not.toHaveBeenCalledWith('git', expect.arrayContaining(['commit']));

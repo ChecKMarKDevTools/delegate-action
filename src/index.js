@@ -1,8 +1,8 @@
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import * as github from '@actions/github';
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
 import sanitizeFilename from 'sanitize-filename';
 import validator from 'validator';
 import pino from 'pino';
@@ -355,7 +355,7 @@ async function run() {
     const baseBranch = core.getInput('branch', { required: false }) || 'main';
 
     const { context } = github;
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const timestamp = new Date().toISOString().replaceAll(/[:.]/g, '-');
     const newBranch = `copilot/delegate-${timestamp}`;
 
     logger.info(
@@ -401,19 +401,23 @@ async function run() {
       newBranch
     );
 
+    const promptFileSection = filename ? `**Prompt file:** \`${filename}\`\n\n` : '';
+    const prBody =
+      `## Automated changes by Delegate Action\n\n` +
+      `This PR was automatically created by the delegate-action.\n\n` +
+      promptFileSection +
+      `**Base branch:** \`${baseBranch}\`\n` +
+      `**Created by:** @${context.actor}\n\n` +
+      `Please review the changes carefully before merging.\n\n` +
+      `---\n\n` +
+      `_Generated with GitHub Copilot as directed by @${context.actor}_`;
+
     const prNumber = await createPullRequest(
       privateToken,
       newBranch,
       baseBranch,
       `Delegate: ${filename || 'Repository changes'}`,
-      `## Automated changes by Delegate Action\n\n` +
-        `This PR was automatically created by the delegate-action.\n\n` +
-        `${filename ? `**Prompt file:** \`${filename}\`\n\n` : ''}` +
-        `**Base branch:** \`${baseBranch}\`\n` +
-        `**Created by:** @${context.actor}\n\n` +
-        `Please review the changes carefully before merging.\n\n` +
-        `---\n\n` +
-        `_Generated with GitHub Copilot as directed by @${context.actor}_`
+      prBody
     );
 
     if (prNumber) {
@@ -429,7 +433,7 @@ async function run() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  run();
+  await run();
 }
 
 export {
