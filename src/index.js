@@ -1,8 +1,8 @@
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import * as github from '@actions/github';
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
 import sanitizeFilename from 'sanitize-filename';
 import validator from 'validator';
 import pino from 'pino';
@@ -357,7 +357,7 @@ async function run() {
     const baseBranch = core.getInput('branch', { required: false }) || 'main';
 
     const { context } = github;
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const timestamp = new Date().toISOString().replaceAll(/[:.]/g, '-');
     const newBranch = `copilot/delegate-${timestamp}`;
 
     logger.info(
@@ -403,6 +403,7 @@ async function run() {
       newBranch
     );
 
+    const promptFileLine = filename ? `**Prompt file:** \`${filename}\`\n\n` : '';
     const prNumber = await createPullRequest(
       privateToken,
       newBranch,
@@ -410,7 +411,7 @@ async function run() {
       `Delegate: ${filename || 'Repository changes'}`,
       `## Automated changes by Delegate Action\n\n` +
         `This PR was automatically created by the delegate-action.\n\n` +
-        `${filename ? `**Prompt file:** \`${filename}\`\n\n` : ''}` +
+        promptFileLine +
         `**Base branch:** \`${baseBranch}\`\n` +
         `**Created by:** @${context.actor}\n\n` +
         `Please review the changes carefully before merging.\n\n` +
@@ -431,7 +432,7 @@ async function run() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  run();
+  await run();
 }
 
 export {

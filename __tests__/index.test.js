@@ -1,7 +1,6 @@
-import './mocks.js';
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as fs from 'fs';
-import { mockCore, mockExec, mockGitHub, mockCopilotLoader } from './mocks.js';
+import * as fs from 'node:fs';
+import { mockCore, mockExec, mockGitHub, mockCopilotClient, mockCopilotLoader } from './mocks.js';
 
 describe('Delegate Action', () => {
   beforeEach(() => {
@@ -24,6 +23,10 @@ describe('Delegate Action', () => {
         issues: { addAssignees: vi.fn().mockResolvedValue({}) },
       },
     });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   describe('detectPromptInjection', () => {
@@ -151,13 +154,8 @@ describe('Delegate Action', () => {
     });
 
     test('handles session errors', async () => {
-      mockCopilotLoader.getCopilotClient.mockResolvedValueOnce(
-        class {
-          async start() {
-            throw new Error('Start failed');
-          }
-          async forceStop() {}
-        }
+      vi.spyOn(mockCopilotClient.prototype, 'start').mockRejectedValueOnce(
+        new Error('Start failed')
       );
       const { runCopilot } = await import('../src/index.js');
       await expect(runCopilot('token', 'test')).rejects.toThrow();
@@ -165,20 +163,15 @@ describe('Delegate Action', () => {
 
     test('handles permission requests', async () => {
       let permissionHandler;
-      mockCopilotLoader.getCopilotClient.mockResolvedValueOnce(
-        class {
-          async start() {}
-          async createSession(options) {
-            permissionHandler = options.onPermissionRequest;
-            return {
-              sessionId: 'test',
-              on: vi.fn(),
-              sendAndWait: vi.fn().mockResolvedValue({ content: 'response' }),
-              destroy: vi.fn(),
-            };
-          }
-          async stop() {}
-          async forceStop() {}
+      vi.spyOn(mockCopilotClient.prototype, 'createSession').mockImplementationOnce(
+        async (options) => {
+          permissionHandler = options.onPermissionRequest;
+          return {
+            sessionId: 'test',
+            on: vi.fn(),
+            sendAndWait: vi.fn().mockResolvedValue({ content: 'response' }),
+            destroy: vi.fn(),
+          };
         }
       );
       const { runCopilot } = await import('../src/index.js');
@@ -192,23 +185,14 @@ describe('Delegate Action', () => {
 
     test('handles session events', async () => {
       let eventHandler;
-      mockCopilotLoader.getCopilotClient.mockResolvedValueOnce(
-        class {
-          async start() {}
-          async createSession() {
-            return {
-              sessionId: 'test',
-              on: (handler) => {
-                eventHandler = handler;
-              },
-              sendAndWait: vi.fn().mockResolvedValue({ content: 'response' }),
-              destroy: vi.fn(),
-            };
-          }
-          async stop() {}
-          async forceStop() {}
-        }
-      );
+      vi.spyOn(mockCopilotClient.prototype, 'createSession').mockImplementationOnce(async () => ({
+        sessionId: 'test',
+        on: (handler) => {
+          eventHandler = handler;
+        },
+        sendAndWait: vi.fn().mockResolvedValue({ content: 'response' }),
+        destroy: vi.fn(),
+      }));
       const { runCopilot } = await import('../src/index.js');
       await runCopilot('token', 'test');
       expect(eventHandler).toBeDefined();
@@ -220,15 +204,11 @@ describe('Delegate Action', () => {
     });
 
     test('handles forceStop errors', async () => {
-      mockCopilotLoader.getCopilotClient.mockResolvedValueOnce(
-        class {
-          async start() {
-            throw new Error('Start failed');
-          }
-          async forceStop() {
-            throw new Error('Stop failed');
-          }
-        }
+      vi.spyOn(mockCopilotClient.prototype, 'start').mockRejectedValueOnce(
+        new Error('Start failed')
+      );
+      vi.spyOn(mockCopilotClient.prototype, 'forceStop').mockRejectedValueOnce(
+        new Error('Stop failed')
       );
       const { runCopilot } = await import('../src/index.js');
       await expect(runCopilot('token', 'test')).rejects.toThrow('Start failed');
@@ -263,9 +243,6 @@ describe('Delegate Action', () => {
     });
 
     test('skips when no changes', async () => {
-      mockExec.exec.mockImplementation((cmd, args) =>
-        args?.includes('diff-index') ? Promise.resolve(0) : Promise.resolve(0)
-      );
       const { commitAndPush } = await import('../src/index.js');
       await commitAndPush('msg', 'branch');
       expect(mockExec.exec).not.toHaveBeenCalledWith('git', expect.arrayContaining(['commit']));
