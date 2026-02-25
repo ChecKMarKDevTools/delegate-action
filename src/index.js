@@ -6,7 +6,7 @@ import path from 'path';
 import sanitizeFilename from 'sanitize-filename';
 import validator from 'validator';
 import pino from 'pino';
-import { getCopilotClient } from './copilot-loader.js';
+import { createProvider } from './providers/index.js';
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -127,108 +127,41 @@ async function validateFile(filename) {
 }
 
 /**
- * Run GitHub Copilot SDK with instructions
- * @param {string} token - GitHub token
+ * Run LLM provider with instructions
+ * @param {import('./providers/provider.js').LLMProvider} provider - LLM provider instance
  * @param {string} instructions - Instructions to follow
  * @param {string|null} instructionFile - Optional file path to attach as context
- * @returns {Promise<void>}
+ * @returns {Promise<string>} The LLM response text
  */
-async function runCopilot(token, instructions, instructionFile = null) {
+async function runLLM(provider, instructions, instructionFile = null) {
   const injectionCheck = detectPromptInjection(instructions);
   if (!injectionCheck.isValid) {
     logger.error({ reason: injectionCheck.reason }, 'Prompt injection detected');
     throw new Error(`Security: ${injectionCheck.reason}`);
   }
 
-  logger.info('Initializing GitHub Copilot SDK');
+  logger.info({ provider: provider.name, model: provider.model }, 'Running LLM provider');
 
-  const CopilotClient = await getCopilotClient();
+  let fileContent = null;
+  let fileName = null;
 
-  const client = new CopilotClient({
-    logLevel: 'info',
-    autoStart: true,
-    autoRestart: true,
+  if (instructionFile) {
+    fileContent = fs.readFileSync(instructionFile, 'utf8');
+    fileName = path.basename(instructionFile);
+  }
+
+  const response = await provider.generate({
+    instructions,
+    fileContent,
+    fileName,
   });
 
-  try {
-    await client.start();
-    logger.info('Copilot client started successfully');
+  logger.info(
+    { provider: provider.name, responseLength: response.length },
+    'LLM execution completed'
+  );
 
-    const session = await client.createSession({
-      model: 'gpt-5',
-      streaming: true,
-      onPermissionRequest: async (request) => {
-        logger.info({ requestKind: request.kind }, 'Permission requested');
-
-        switch (request.kind) {
-          case 'read':
-            return { kind: 'approved' };
-          case 'write':
-            return { kind: 'approved' };
-          case 'shell':
-            return { kind: 'approved' };
-          default:
-            logger.warn({ requestKind: request.kind }, 'Unknown permission request kind');
-            return { kind: 'approved' };
-        }
-      },
-    });
-
-    logger.info({ sessionId: session.sessionId }, 'Session created');
-
-    session.on((event) => {
-      switch (event.type) {
-        case 'assistant.message_delta':
-          process.stdout.write(event.data.deltaContent);
-          break;
-        case 'assistant.message':
-          logger.info('Assistant response completed');
-          break;
-        case 'tool.execution_start':
-          logger.info({ toolName: event.data.toolName }, 'Tool execution started');
-          break;
-        case 'tool.execution_end':
-          logger.info({ toolName: event.data.toolName }, 'Tool execution completed');
-          break;
-        case 'session.error':
-          logger.error({ error: event.data.message }, 'Session error');
-          break;
-      }
-    });
-
-    const messageOptions = {
-      prompt: instructions,
-    };
-
-    if (instructionFile) {
-      messageOptions.attachments = [
-        {
-          type: 'file',
-          path: instructionFile,
-          displayName: path.basename(instructionFile),
-        },
-      ];
-    }
-
-    logger.info({ instructionsLength: instructions.length }, 'Sending message to Copilot');
-    await session.sendAndWait(messageOptions, 300000);
-
-    logger.info('Copilot execution completed successfully');
-
-    await session.destroy();
-    await client.stop();
-  } catch (error) {
-    logger.error({ error: error.message, stack: error.stack }, 'Copilot SDK execution failed');
-    core.warning(`Copilot SDK execution failed: ${error.message}`);
-
-    try {
-      await client.forceStop();
-    } catch (stopError) {
-      logger.error({ error: stopError.message }, 'Failed to stop Copilot client');
-    }
-
-    throw error;
-  }
+  return response;
 }
 
 /**
@@ -352,13 +285,22 @@ async function assignPR(token, prNumber) {
  */
 async function run() {
   try {
-    const privateToken = core.getInput('PRIVATE_TOKEN', { required: true });
+    const providerName = core.getInput('LLM_PROVIDER', { required: true });
+    const apiKey = core.getInput('LLM_API_KEY', { required: true });
+    const modelOverride = core.getInput('LLM_MODEL', { required: false }) || undefined;
     const filename = core.getInput('filename', { required: false });
     const baseBranch = core.getInput('branch', { required: false }) || 'main';
 
+    const provider = createProvider({
+      provider: providerName,
+      apiKey,
+      model: modelOverride,
+      logger,
+    });
+
     const { context } = github;
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const newBranch = `copilot/delegate-${timestamp}`;
+    const timestamp = new Date().toISOString().replaceAll(/[:.]/g, '-');
+    const newBranch = `delegate/${providerName}-${timestamp}`;
 
     logger.info(
       {
@@ -366,6 +308,8 @@ async function run() {
         baseBranch,
         newBranch,
         actor: context.actor,
+        provider: provider.name,
+        model: provider.model,
       },
       'Starting delegate action workflow'
     );
@@ -389,37 +333,40 @@ async function run() {
       }
     }
 
-    await runCopilot(privateToken, instructions, instructionFilePath);
+    await runLLM(provider, instructions, instructionFilePath);
     await createBranch(newBranch);
     await commitAndPush(
-      `feat: delegate action changes\n\nGenerated with GitHub Copilot as directed by @${context.actor}`,
+      `feat: delegate action changes\n\nGenerated by ${provider.name} as directed by @${context.actor}`,
       newBranch
     );
 
     const reviewInstructions = `Review the changes in branch ${newBranch}, create documentation for new features, and suggest test cases`;
-    await runCopilot(privateToken, reviewInstructions);
+    await runLLM(provider, reviewInstructions);
     await commitAndPush(
-      `docs: add documentation and tests\n\nGenerated with GitHub Copilot as directed by @${context.actor}`,
+      `docs: add documentation and tests\n\nGenerated by ${provider.name} as directed by @${context.actor}`,
       newBranch
     );
 
+    const githubToken = process.env.GITHUB_TOKEN;
+    const promptFileLine = filename ? `**Prompt file:** \`${filename}\`\n\n` : '';
     const prNumber = await createPullRequest(
-      privateToken,
+      githubToken || apiKey,
       newBranch,
       baseBranch,
       `Delegate: ${filename || 'Repository changes'}`,
       `## Automated changes by Delegate Action\n\n` +
         `This PR was automatically created by the delegate-action.\n\n` +
-        `${filename ? `**Prompt file:** \`${filename}\`\n\n` : ''}` +
+        promptFileLine +
+        `**LLM Provider:** \`${provider.name}\` (model: \`${provider.model}\`)\n` +
         `**Base branch:** \`${baseBranch}\`\n` +
         `**Created by:** @${context.actor}\n\n` +
         `Please review the changes carefully before merging.\n\n` +
         `---\n\n` +
-        `_Generated with GitHub Copilot as directed by @${context.actor}_`
+        `_Generated by ${provider.name} as directed by @${context.actor}_`
     );
 
     if (prNumber) {
-      await assignPR(privateToken, prNumber);
+      await assignPR(githubToken || apiKey, prNumber);
       core.setOutput('pr_number', prNumber);
       core.setOutput('branch', newBranch);
       logger.info({ prNumber, branch: newBranch }, 'Delegate action completed successfully');
@@ -438,7 +385,7 @@ export {
   detectPromptInjection,
   validateFilename,
   validateFile,
-  runCopilot,
+  runLLM,
   createBranch,
   commitAndPush,
   createPullRequest,

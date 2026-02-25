@@ -1,25 +1,10 @@
 import { vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
-  const mockCopilotClient = class {
-    started = false;
-    async start() {
-      this.started = true;
-    }
-    async createSession() {
-      return {
-        sessionId: 'mock-123',
-        on: vi.fn(),
-        sendAndWait: vi.fn().mockResolvedValue({ content: 'response' }),
-        destroy: vi.fn(),
-      };
-    }
-    async stop() {
-      this.started = false;
-    }
-    async forceStop() {
-      this.started = false;
-    }
+  const mockProvider = {
+    name: 'mock-provider',
+    model: 'mock-model',
+    generate: vi.fn().mockResolvedValue('Mock LLM response'),
   };
 
   return {
@@ -42,16 +27,17 @@ const mocks = vi.hoisted(() => {
       },
       getOctokit: vi.fn(),
     },
-    mockCopilotClient,
-    mockCopilotLoader: {
-      getCopilotClient: vi.fn().mockResolvedValue(mockCopilotClient),
+    mockProvider,
+    mockProviders: {
+      createProvider: vi.fn().mockReturnValue(mockProvider),
+      LLMProvider: class {},
     },
   };
 });
 
-export const { mockCore, mockExec, mockGitHub, mockCopilotClient, mockCopilotLoader } = mocks;
+export const { mockCore, mockExec, mockGitHub, mockProvider, mockProviders } = mocks;
 
 vi.mock('@actions/core', () => mocks.mockCore);
 vi.mock('@actions/exec', () => mocks.mockExec);
 vi.mock('@actions/github', () => mocks.mockGitHub);
-vi.mock('../src/copilot-loader.js', () => mocks.mockCopilotLoader);
+vi.mock('../src/providers/index.js', () => mocks.mockProviders);
