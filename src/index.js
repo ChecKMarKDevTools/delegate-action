@@ -4,7 +4,7 @@ import * as github from '@actions/github';
 import fs from 'fs';
 import path from 'path';
 import sanitizeFilename from 'sanitize-filename';
-import validator from 'validator';
+
 import pino from 'pino';
 import { createGitHubModelsClient } from './github-models.js';
 
@@ -74,7 +74,7 @@ function detectPromptInjection(text) {
  * @returns {string} Sanitized filename
  */
 function validateFilename(filename) {
-  if (!filename || !validator.isLength(filename, { min: 1, max: 255 })) {
+  if (!filename || typeof filename !== 'string' || filename.length < 1 || filename.length > 255) {
     throw new Error('Filename must be between 1 and 255 characters');
   }
 
