@@ -19,7 +19,7 @@ export default defineConfig({
         '**/*.test.js',
         '**/*.config.js',
         'coverage/**',
-        'src/providers/copilot.js',
+
       ],
       include: ['src/**/*.js'],
       all: true,

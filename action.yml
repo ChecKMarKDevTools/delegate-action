@@ -1,21 +1,15 @@
 name: 'Delegate Action'
-description: 'A GitHub Action that uses a pluggable LLM provider to delegate tasks, create PRs, and assign reviewers'
+description: 'A GitHub Action that uses GitHub Models to delegate tasks, create PRs, and assign reviewers'
 author: 'ChecKMarKDevTools'
 branding:
   icon: 'git-pull-request'
   color: 'blue'
 
 inputs:
-  LLM_PROVIDER:
-    description: 'LLM provider to use (openai, anthropic, copilot)'
-    required: true
-  LLM_API_KEY:
-    description: 'API key for the chosen LLM provider (OpenAI key, Anthropic key, or GitHub PAT for copilot)'
-    required: true
-  LLM_MODEL:
-    description: 'Optional model override for the LLM provider'
+  MODEL:
+    description: 'GitHub Models model name (e.g. gpt-4o, gpt-4o-mini, o3-mini)'
     required: false
-    default: ''
+    default: 'gpt-4o'
   filename:
     description: 'Optional filename in the repository to process'
     required: false

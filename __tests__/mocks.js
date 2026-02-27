@@ -1,43 +1,45 @@
 import { vi } from 'vitest';
 
-const mocks = vi.hoisted(() => {
-  const mockProvider = {
-    name: 'mock-provider',
-    model: 'mock-model',
-    generate: vi.fn().mockResolvedValue('Mock LLM response'),
-  };
+// ── @actions/core ───────────────────────────────────────────────────
+export const mockCore = {
+  getInput: vi.fn(),
+  setFailed: vi.fn(),
+  setOutput: vi.fn(),
+  info: vi.fn(),
+  warning: vi.fn(),
+  error: vi.fn(),
+  startGroup: vi.fn(),
+  endGroup: vi.fn(),
+  addPath: vi.fn(),
+};
 
-  return {
-    mockCore: {
-      getInput: vi.fn(),
-      setOutput: vi.fn(),
-      setFailed: vi.fn(),
-      error: vi.fn(),
-      warning: vi.fn(),
-      info: vi.fn(),
-    },
-    mockExec: {
-      exec: vi.fn(),
-    },
-    mockGitHub: {
-      context: {
-        repo: { owner: 'testowner', repo: 'testrepo' },
-        actor: 'testuser',
-        ref: 'refs/heads/main',
-      },
-      getOctokit: vi.fn(),
-    },
-    mockProvider,
-    mockProviders: {
-      createProvider: vi.fn().mockReturnValue(mockProvider),
-      LLMProvider: class {},
-    },
-  };
-});
+vi.mock('@actions/core', () => mockCore);
 
-export const { mockCore, mockExec, mockGitHub, mockProvider, mockProviders } = mocks;
+// ── @actions/exec ───────────────────────────────────────────────────
+export const mockExec = { exec: vi.fn() };
 
-vi.mock('@actions/core', () => mocks.mockCore);
-vi.mock('@actions/exec', () => mocks.mockExec);
-vi.mock('@actions/github', () => mocks.mockGitHub);
-vi.mock('../src/providers/index.js', () => mocks.mockProviders);
+vi.mock('@actions/exec', () => mockExec);
+
+// ── @actions/github ─────────────────────────────────────────────────
+export const mockGitHub = {
+  context: {
+    repo: { owner: 'testowner', repo: 'testrepo' },
+    actor: 'testuser',
+  },
+  getOctokit: vi.fn(),
+};
+
+vi.mock('@actions/github', () => mockGitHub);
+
+// ── github-models.js ────────────────────────────────────────────────
+export const mockClient = {
+  name: 'github-models',
+  model: 'gpt-4o',
+  generate: vi.fn(),
+};
+
+export const mockGitHubModels = {
+  createGitHubModelsClient: vi.fn().mockReturnValue(mockClient),
+};
+
+vi.mock('../src/github-models.js', () => mockGitHubModels);
