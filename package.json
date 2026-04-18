@@ -50,11 +50,11 @@
     "@eslint/js": "^10.0.1",
     "@vercel/ncc": "^0.38.3",
     "@vitest/coverage-v8": "^4.1.4",
-    "eslint": "^10.2.0",
+    "eslint": "^10.2.1",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.2.1",
-    "lefthook": "^2.1.5",
-    "prettier": "^3.8.2",
+    "lefthook": "^2.1.6",
+    "prettier": "^3.8.3",
     "vitest": "^4.0.17"
   },
   "engines": {
